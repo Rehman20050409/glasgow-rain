@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is it raining in Glasgow?</title>
+<meta name="description" content="A live answer to Glasgow's most asked question, with this year's rain in numbers.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #1b1b1d; --panel: #232326; --text: #efeff1; --muted: #a9a9b0; --line: #36363b; --accent: #a3a8ff; --rain: #7cc7f2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--muted); font: 15px/1.6 system-ui, sans-serif; overflow-x: hidden; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; position: relative; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  h1 { color: var(--muted); font-size: 18px; font-weight: 400; margin: 0; display: flex; align-items: center; gap: 10px; }
+  #answer { color: var(--text); font-size: clamp(96px, 30vw, 220px); font-weight: 800; line-height: 1; letter-spacing: -.04em; margin: 24px 0 8px; }
+  .raining #answer { color: var(--rain); }
+  #detail { color: var(--text); font-size: 20px; margin: 0; }
+  #quip { margin: 4px 0 0; }
+  h2 { color: var(--text); font-size: 15px; margin: 48px 0 12px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 0; }
+  .tiles div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tiles dt { font-size: 13px; }
+  .tiles dd { margin: 0; color: var(--text); font-size: 22px; font-weight: 600; }
+  .tiles small { display: block; color: var(--muted); font-size: 13px; font-weight: 400; }
+  .year { display: flex; align-items: flex-end; gap: 1px; height: 120px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .year i { flex: 1; min-height: 2px; background: var(--line); border-radius: 1px; }
+  .year i.wet { background: var(--rain); }
+  .months { display: flex; font-size: 12px; padding: 4px 10px 0; }
+  .months span { flex: 1; }
+  .note { font-size: 13px; margin-top: 32px; }
+  /* falling drops, added by the script only while it is raining */
+  .drops { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: -1; }
+  .drops i { position: absolute; top: -80px; width: 1px; height: 70px; background: linear-gradient(transparent, var(--rain)); opacity: .35; animation: fall linear infinite; }
+  @keyframes fall { to { transform: translateY(calc(100vh + 160px)); } }
+  @media (prefers-reduced-motion: reduce) { .drops { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1><img src="logo.svg" alt="" width="32" height="32">Is it raining in Glasgow?</h1>
+  <div aria-live="polite">
+    <p id="answer">…</p>
+    <p id="detail">Checking the sky.</p>
+    <p id="quip"></p>
+  </div>
+
+  <section id="stats" hidden>
+    <h2 id="year-title"></h2>
+    <dl class="tiles" id="tiles"></dl>
+
+    <h2>Every day so far</h2>
+    <div class="year" id="year" role="img"></div>
+    <div class="months" id="months" aria-hidden="true"></div>
+  </section>
+
+  <p class="note">A wet day means 1 mm of rain or more. Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>.</p>
+</main>
+
+<script src="rain.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const PLACE = 'latitude=55.8642&longitude=-4.2518&timezone=Europe%2FLondon';
+const shortDate = (iso) => new Date(`${iso}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+const spell = (run) => (run ? [plural(run.days, 'day'), run.days === 1 ? shortDate(run.from) : `${shortDate(run.from)} to ${shortDate(run.to)}`] : ['None yet', '']);
+
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`weather service answered ${res.status}`);
+  return res.json();
+}
+
+function showNow(now, stats) {
+  document.body.classList.toggle('raining', now.raining);
+  $('answer').textContent = now.raining ? 'Yes.' : 'No.';
+  $('detail').textContent = `${now.sky}, ${now.temperature}°C.`;
+  const streak = plural(stats.current.days, 'day');
+  $('quip').textContent = now.raining
+    ? (stats.current.wet ? `Of course it is. That makes ${streak} of rain in a row.` : 'Of course it is.')
+    : (stats.current.wet ? 'Not this minute. Take your chance.' : `Not right now. It has been dry for ${streak} running, which is suspicious.`);
+
+  if (now.raining) {
+    const drops = document.createElement('div');
+    drops.className = 'drops';
+    drops.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 40; i++) {
+      const drop = document.createElement('i');
+      drop.style.left = `${Math.random() * 100}%`;
+      drop.style.animationDuration = `${0.6 + Math.random() * 0.6}s`;
+      drop.style.animationDelay = `${-Math.random()}s`;
+      drops.append(drop);
+    }
+    document.body.append(drops);
+  }
+}
+
+function showYear(days, stats) {
+  const year = days[0].date.slice(0, 4);
+  $('year-title').textContent = `${year} so far`;
+  const [dry, dryWhen] = spell(stats.longestDry), [wet, wetWhen] = spell(stats.longestWet);
+  const tiles = [
+    ['Wet days', `${stats.wetDays} of ${stats.days}`, `${stats.wetShare}% of the year`],
+    ['Longest dry spell', dry, dryWhen],
+    ['Longest wet spell', wet, wetWhen],
+    ['Wettest day', `${stats.wettest.mm.toFixed(1)} mm`, shortDate(stats.wettest.date)],
+    ['Rain so far', `${stats.totalMm.toLocaleString()} mm`, `about ${(stats.totalMm / 1000).toFixed(1)} m of water`],
+  ];
+  $('tiles').replaceChildren(...tiles.map(([label, value, note]) => {
+    const tile = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'), small = document.createElement('small');
+    dt.textContent = label;
+    small.textContent = note;
+    dd.append(value, small);
+    tile.append(dt, dd);
+    return tile;
+  }));
+
+  // one bar per day; the square root keeps a drizzle visible next to a downpour
+  const tallest = Math.sqrt(stats.wettest.mm) || 1;
+  $('year').replaceChildren(...days.map((day) => {
+    const bar = document.createElement('i');
+    bar.style.height = `${Math.sqrt(day.mm) / tallest * 100}%`;
+    if (day.mm >= WET_DAY_MM) bar.className = 'wet';
+    bar.title = `${shortDate(day.date)}: ${day.mm.toFixed(1)} mm`;
+    return bar;
+  }));
+  $('year').setAttribute('aria-label', `Rain on each day of ${year}: ${stats.wetDays} wet days out of ${stats.days}.`);
+
+  // a label under the first day of each month, spaced by how many days that month has so far
+  const months = new Map();
+  for (const day of days) months.set(day.date.slice(0, 7), (months.get(day.date.slice(0, 7)) ?? 0) + 1);
+  $('months').replaceChildren(...[...months].map(([month, count]) => {
+    const label = document.createElement('span');
+    label.style.flexGrow = count;
+    label.textContent = count > 9 ? new Date(`${month}-15`).toLocaleDateString('en-GB', { month: 'short' }) : '';
+    return label;
+  }));
+  $('stats').hidden = false;
+}
+
+(async () => {
+  try {
+    const live = await getJson(`https://api.open-meteo.com/v1/forecast?${PLACE}&current=precipitation,weather_code,temperature_2m&daily=precipitation_sum&past_days=14&forecast_days=1`);
+    const today = live.daily.time.at(-1); // today's date in Glasgow, whatever the visitor's clock says
+    const year = await getJson(`https://archive-api.open-meteo.com/v1/archive?${PLACE}&daily=precipitation_sum&start_date=${today.slice(0, 4)}-01-01&end_date=${today}`);
+    const days = mergeDays(year.daily, live.daily).filter((day) => day.date.startsWith(today.slice(0, 4)));
+    const stats = yearStats(days);
+    showNow(rightNow(live.current), stats);
+    showYear(days, stats);
+  } catch (e) {
+    console.error(e);
+    $('answer').textContent = 'Probably.';
+    $('detail').textContent = "Couldn't reach the weather service, so that is a guess.";
+    $('quip').textContent = 'It is a safe guess, though. Try again in a minute.';
+  }
+})();
+</script>
+</body>
+</html>
